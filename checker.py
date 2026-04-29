@@ -152,7 +152,8 @@ def _check_barcode(context, barcode: str) -> dict:
         if not product_el and not is_in and not is_out:
             return _result('not_found', 'Не са намерени резултати', barcode)
 
-        if is_out and not is_in:
+        # is_out takes priority — "In Stock" appears in filter buttons even for OOS products
+        if is_out:
             return _result('out_of_stock', 'Няма наличност', barcode, name, href)
         elif is_in:
             return _result('in_stock', 'Има наличност', barcode, name, href)
@@ -176,7 +177,7 @@ def _check_by_url(context, url: str) -> dict:
         page.wait_for_timeout(3_000)
         body = page.inner_text('body').lower()
         is_in, is_out = _detect_stock(page, body)
-        if is_out and not is_in:
+        if is_out:
             return {'status': 'out_of_stock'}
         elif is_in:
             return {'status': 'in_stock'}
