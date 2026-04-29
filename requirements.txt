@@ -1,4 +1,4 @@
 flask>=3.0
 apscheduler>=3.10
-playwright>=1.44
+playwright==1.59.0
 tzdata
