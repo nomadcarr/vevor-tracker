@@ -1,0 +1,6 @@
+{
+    "vevor_domain": "www.vevor.bg",
+    "check_interval_hours": 3,
+    "delay_between_checks": 3,
+    "debug_screenshots": false
+}

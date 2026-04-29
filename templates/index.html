@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vevor — Наличности</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh}
+
+/* HEADER */
+header{background:#161b22;border-bottom:1px solid #21262d;padding:13px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+header h1{font-size:16px;font-weight:600;color:#f0f6fc}
+header h1 span{color:#388bfd}
+.hright{display:flex;align-items:center;gap:14px}
+#last-upd{font-size:12px;color:#484f58}
+#chk-badge{font-size:12px;color:#388bfd;display:none;align-items:center;gap:6px}
+#chk-badge.on{display:flex}
+
+/* MAIN */
+main{max-width:1300px;margin:0 auto;padding:22px 16px}
+
+/* FORM */
+.form{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:16px 20px;margin-bottom:18px;display:flex;gap:11px;flex-wrap:wrap;align-items:flex-end}
+.fg{display:flex;flex-direction:column;gap:5px}
+label{font-size:11px;color:#8b949e;font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+input[type=text]{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:8px 11px;font-size:13px;outline:none;transition:border-color .15s}
+input[type=text]:focus{border-color:#388bfd}
+#f-barcode{width:160px}
+#f-order{width:130px}
+#f-name{width:270px}
+
+/* BUTTONS */
+.btn{padding:8px 17px;border-radius:6px;border:none;font-size:13px;font-weight:500;cursor:pointer;transition:opacity .15s,transform .1s;white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn-add{background:#238636;color:#fff}.btn-add:hover{background:#2ea043}
+.btn-chk{background:#1f6feb;color:#fff}.btn-chk:hover{background:#388bfd}
+.btn-del{background:transparent;color:#f85149;border:1px solid #f8514930;padding:5px 10px;font-size:12px;border-radius:5px}.btn-del:hover{background:#f8514912}
+.btn-alt{background:#6e40c9;color:#fff;padding:5px 11px;font-size:12px}.btn-alt:hover{background:#8250df}
+.btn-alt-clr{background:transparent;color:#8b949e;border:1px solid #30363d;padding:4px 9px;font-size:11px;border-radius:5px}.btn-alt-clr:hover{background:#21262d}
+
+/* STATS */
+.stats{display:flex;gap:11px;margin-bottom:18px;flex-wrap:wrap}
+.stat{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:11px 18px;min-width:95px;text-align:center}
+.sv{font-size:21px;font-weight:700}.sl{font-size:11px;color:#484f58;margin-top:2px}
+.st .sv{color:#8b949e}.si .sv{color:#3fb950}.so .sv{color:#f85149}.sp .sv{color:#d29922}
+
+/* TABLE */
+.tw{background:#161b22;border:1px solid #21262d;border-radius:10px;overflow:hidden;overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:900px}
+th{background:#0d1117;padding:9px 13px;text-align:left;font-size:11px;font-weight:600;color:#484f58;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #21262d;white-space:nowrap}
+td{padding:12px 13px;border-bottom:1px solid #161b22;font-size:13px;vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#1c2128}
+tr.ra td{animation:pbg 2.5s ease-in-out infinite}
+tr.ra:hover td{background:rgba(63,185,80,.14)}
+@keyframes pbg{0%,100%{background:rgba(63,185,80,.06)}50%{background:rgba(63,185,80,.13)}}
+
+/* BADGES */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
+.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.bi{background:rgba(63,185,80,.15);color:#3fb950;border:1px solid rgba(63,185,80,.3)}
+.bi .dot{background:#3fb950;animation:bl 1.2s ease-in-out infinite}
+.bo{background:rgba(248,81,73,.15);color:#f85149;border:1px solid rgba(248,81,73,.3)}
+.bo .dot{background:#f85149}
+.bp{background:rgba(139,148,158,.12);color:#8b949e;border:1px solid rgba(139,148,158,.2)}
+.bp .dot{background:#8b949e}
+.be{background:rgba(210,153,34,.15);color:#d29922;border:1px solid rgba(210,153,34,.3)}
+.be .dot{background:#d29922}
+.bn{background:rgba(188,140,252,.12);color:#bc8cfc;border:1px solid rgba(188,140,252,.25)}
+.bn .dot{background:#bc8cfc}
+@keyframes bl{0%,100%{opacity:1}50%{opacity:.2}}
+
+/* SIMILARITY tags */
+.sim-id{background:rgba(63,185,80,.15);color:#3fb950;font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600}
+.sim-si{background:rgba(56,139,253,.15);color:#388bfd;font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600}
+
+/* ALT cell */
+.alt-cell{min-width:220px}
+.alt-name{font-size:12px;color:#c9d1d9;margin-bottom:4px}
+.alt-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.alt-searching{color:#8b949e;font-size:12px;display:flex;align-items:center;gap:6px}
+.alt-notfound{color:#484f58;font-size:12px}
+
+/* MISC */
+.mono{font-family:'Courier New',monospace;font-size:12px;color:#8b949e}
+.muted{color:#484f58;font-size:12px}
+.vlink{color:#388bfd;text-decoration:none;font-size:12px}.vlink:hover{text-decoration:underline}
+.order-badge{background:#21262d;color:#8b949e;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600}
+.empty{text-align:center;padding:55px 20px;color:#484f58}
+.empty-icon{font-size:36px;margin-bottom:10px}
+
+/* SPINNER */
+.spin{display:inline-block;width:12px;height:12px;border:2px solid #1f6feb30;border-top-color:#388bfd;border-radius:50%;animation:rot .6s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* TOAST */
+#toasts{position:fixed;top:65px;right:16px;z-index:1000;display:flex;flex-direction:column;gap:9px}
+.toast{background:#161b22;border-radius:8px;padding:13px 17px;font-size:13px;max-width:290px;animation:si .3s ease;box-shadow:0 4px 24px rgba(0,0,0,.5)}
+.toast.green{border:1px solid #3fb950}
+.toast.blue{border:1px solid #388bfd}
+.toast strong{display:block;margin-bottom:3px}
+.toast.green strong{color:#3fb950}
+.toast.blue strong{color:#388bfd}
+.toast.out{animation:so .3s ease forwards}
+@keyframes si{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes so{to{transform:translateX(110%);opacity:0}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>Vevor</span> Stock Tracker</h1>
+  <div class="hright">
+    <div id="chk-badge"><span class="spin"></span> Проверява се...</div>
+    <span id="last-upd"></span>
+    <button class="btn btn-chk" id="chk-btn" onclick="triggerCheck()">Провери сега</button>
+  </div>
+</header>
+
+<main>
+
+  <div class="form">
+    <div class="fg">
+      <label>Баркод *</label>
+      <input type="text" id="f-barcode" placeholder="напр. 6922611281234"
+             onkeydown="if(event.key==='Enter')addItem()">
+    </div>
+    <div class="fg">
+      <label>№ Поръчка</label>
+      <input type="text" id="f-order" placeholder="напр. #405"
+             onkeydown="if(event.key==='Enter')addItem()">
+    </div>
+    <div class="fg">
+      <label>Забележка</label>
+      <input type="text" id="f-name" placeholder="напр. Фреза 12mm за клиент Иванов"
+             onkeydown="if(event.key==='Enter')addItem()">
+    </div>
+    <button class="btn btn-add" onclick="addItem()">+ Добави</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="tw">
+    <table>
+      <thead>
+        <tr>
+          <th>Статус</th>
+          <th>Баркод</th>
+          <th>Поръчка</th>
+          <th>Забележка / Продукт</th>
+          <th>Алтернатива</th>
+          <th>Последна проверка</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="7"><div class="empty"><div class="empty-icon">⏳</div><p>Зареждане...</p></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<div id="toasts"></div>
+
+<script>
+/* ── Audio ─────────────────────────────────── */
+let _ac = null;
+function ac(){ if(!_ac) _ac=new(window.AudioContext||window.webkitAudioContext)(); return _ac; }
+
+function playChime(highPitch){
+  try{
+    const c=ac();
+    const notes = highPitch
+      ? [[659.25,0],[783.99,.18],[1046.5,.36],[1318.5,.54]]   // high = alt found
+      : [[523.25,0],[659.25,.18],[783.99,.36],[1046.5,.54]];  // normal = in stock
+    notes.forEach(([f,t])=>{
+      const o=c.createOscillator(), g=c.createGain();
+      o.connect(g); g.connect(c.destination);
+      o.type='sine'; o.frequency.value=f;
+      const s=c.currentTime+t;
+      g.gain.setValueAtTime(0,s);
+      g.gain.linearRampToValueAtTime(.22,s+.05);
+      g.gain.exponentialRampToValueAtTime(.001,s+.8);
+      o.start(s); o.stop(s+.8);
+    });
+  }catch(e){}
+}
+
+/* ── Toast ─────────────────────────────────── */
+function toast(title, body, type){
+  const w=document.getElementById('toasts');
+  const t=document.createElement('div');
+  t.className=`toast ${type}`;
+  t.innerHTML=`<strong>${title}</strong>${body}`;
+  w.appendChild(t);
+  setTimeout(()=>{ t.classList.add('out'); setTimeout(()=>t.remove(),320); },5500);
+}
+
+/* ── Helpers ───────────────────────────────── */
+function badge(status){
+  const m={
+    in_stock:   ['bi','Има наличност'],
+    out_of_stock:['bo','Няма наличност'],
+    pending:    ['bp','Изчаква'],
+    unknown:    ['bp','Неизвестен'],
+    error:      ['be','Грешка'],
+    not_found:  ['bn','Не е намерен'],
+  };
+  const [c,l]=m[status]||['bp','—'];
+  return `<span class="badge ${c}"><span class="dot"></span>${l}</span>`;
+}
+function fmtDate(ts){
+  if(!ts) return '<span class="muted">—</span>';
+  const d=new Date(ts);
+  return `<span class="muted">${d.toLocaleDateString('bg-BG')} ${d.toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit'})}</span>`;
+}
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+/* ── Alt cell renderer ─────────────────────── */
+function renderAlt(i){
+  const s = i.alt_search_status;
+
+  // Searching spinner
+  if(s === 'searching'){
+    return `<div class="alt-searching"><span class="spin"></span> Търся алтернатива...</div>`;
+  }
+
+  // Found — show info
+  if(i.alt_product_name){
+    const simCls  = i.alt_similarity==='Идентичен' ? 'sim-id' : 'sim-si';
+    const altStat = i.alt_status ? badge(i.alt_status) : '';
+    return `
+      <div class="alt-name">
+        ${i.alt_product_url
+          ? `<a class="vlink" href="${esc(i.alt_product_url)}" target="_blank">${esc(i.alt_product_name).substring(0,55)}…</a>`
+          : esc(i.alt_product_name).substring(0,55)}
+      </div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:4px">
+        <span class="${simCls}">${esc(i.alt_similarity)}</span>
+        ${altStat}
+      </div>
+      <div class="alt-actions">
+        <button class="btn btn-alt-clr" onclick="clearAlt(${i.id})">✕ Изчисти</button>
+      </div>`;
+  }
+
+  // Not found
+  if(s === 'not_found'){
+    return `<div class="alt-notfound">Не е намерена</div>
+      <div class="alt-actions">
+        <button class="btn btn-alt" onclick="findAlt(${i.id})">Опитай отново</button>
+      </div>`;
+  }
+
+  // Default — show button only for out_of_stock items
+  if(i.status === 'out_of_stock'){
+    return `<button class="btn btn-alt" onclick="findAlt(${i.id})">Намери алтернатива</button>`;
+  }
+  return '<span class="muted">—</span>';
+}
+
+/* ── State ─────────────────────────────────── */
+let firstLoad = true;
+
+/* ── Load items ────────────────────────────── */
+async function loadItems(){
+  try{
+    const items = await fetch('/api/items').then(r=>r.json());
+
+    if(!firstLoad){
+      items.forEach(i=>{
+        if(i.new_alert){
+          playChime(false);
+          toast('✓ Има наличност!', i.name||i.product_name||i.barcode, 'green');
+          fetch(`/api/items/${i.id}/dismiss`,{method:'POST'});
+        } else if(i.alt_new_alert){
+          playChime(true);
+          toast('✓ Алтернатива налична!', i.alt_product_name||'', 'blue');
+          fetch(`/api/items/${i.id}/dismiss`,{method:'POST'});
+        }
+      });
+    }
+    firstLoad = false;
+
+    // Stats
+    let tot=items.length, si=0, so=0, sp=0;
+    items.forEach(i=>{ if(i.status==='in_stock') si++; else if(i.status==='out_of_stock') so++; else sp++; });
+    document.getElementById('stats').innerHTML=`
+      <div class="stat st"><div class="sv">${tot}</div><div class="sl">Общо</div></div>
+      <div class="stat si"><div class="sv">${si}</div><div class="sl">С наличност</div></div>
+      <div class="stat so"><div class="sv">${so}</div><div class="sl">Без наличност</div></div>
+      <div class="stat sp"><div class="sv">${sp}</div><div class="sl">Изчакват</div></div>`;
+
+    const tbody = document.getElementById('tbody');
+    if(!items.length){
+      tbody.innerHTML=`<tr><td colspan="7"><div class="empty"><div class="empty-icon">📦</div><p>Няма артикули. Добавете баркод по-горе.</p></div></td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = items.map(i=>`
+      <tr class="${i.new_alert||i.alt_new_alert?'ra':''}" id="row-${i.id}">
+        <td>${badge(i.status)}</td>
+        <td><span class="mono">${esc(i.barcode)}</span></td>
+        <td>${i.order_number?`<span class="order-badge">${esc(i.order_number)}</span>`:'<span class="muted">—</span>'}</td>
+        <td>
+          ${i.name?`<div>${esc(i.name)}</div>`:''}
+          ${i.product_name&&i.product_name!==i.name
+            ?`<div class="muted" style="margin-top:2px">${esc(i.product_name).substring(0,60)}${i.product_name.length>60?'…':''}</div>`:''}
+          ${!i.name&&!i.product_name?'<span class="muted">—</span>':''}
+          ${i.product_url?`<div style="margin-top:3px"><a class="vlink" href="${esc(i.product_url)}" target="_blank">Vevor →</a></div>`:''}
+        </td>
+        <td class="alt-cell">${renderAlt(i)}</td>
+        <td>${fmtDate(i.last_checked)}</td>
+        <td><button class="btn btn-del" onclick="delItem(${i.id},'${esc(i.barcode)}')">Изтрий</button></td>
+      </tr>`).join('');
+
+    document.getElementById('last-upd').textContent =
+      'Обновено: '+new Date().toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit'});
+
+  }catch(e){ console.error(e); }
+}
+
+/* ── Add ───────────────────────────────────── */
+async function addItem(){
+  const barcode = document.getElementById('f-barcode').value.trim();
+  const order   = document.getElementById('f-order').value.trim();
+  const name    = document.getElementById('f-name').value.trim();
+  if(!barcode){ document.getElementById('f-barcode').focus(); return; }
+  const res  = await fetch('/api/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode,order_number:order,name})});
+  const data = await res.json();
+  if(data.error){ alert(data.error); return; }
+  ['f-barcode','f-order','f-name'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f-barcode').focus();
+  await loadItems();
+}
+
+/* ── Delete ────────────────────────────────── */
+async function delItem(id, barcode){
+  if(!confirm(`Спиране на следенето:\n${barcode}`)) return;
+  await fetch(`/api/items/${id}`,{method:'DELETE'});
+  await loadItems();
+}
+
+/* ── Find alternative ──────────────────────── */
+async function findAlt(id){
+  await fetch(`/api/items/${id}/find-alternative`,{method:'POST'});
+  await loadItems();   // will show spinner immediately
+}
+
+async function clearAlt(id){
+  await fetch(`/api/items/${id}/clear-alternative`,{method:'POST'});
+  await loadItems();
+}
+
+/* ── Trigger check ─────────────────────────── */
+let _pollTimer = null;
+async function triggerCheck(){
+  const btn   = document.getElementById('chk-btn');
+  const badge = document.getElementById('chk-badge');
+  btn.disabled = true;
+  badge.classList.add('on');
+  await fetch('/api/check',{method:'POST'});
+  if(_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(async()=>{
+    const {checking} = await fetch('/api/status').then(r=>r.json());
+    await loadItems();
+    if(!checking){
+      clearInterval(_pollTimer);
+      btn.disabled=false;
+      badge.classList.remove('on');
+    }
+  }, 4000);
+}
+
+/* ── Init ──────────────────────────────────── */
+document.addEventListener('click', ()=>ac(), {once:true});
+loadItems();
+setInterval(loadItems, 30_000);
+</script>
+</body>
+</html>
