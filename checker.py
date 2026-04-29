@@ -24,8 +24,8 @@ _UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
 
 
-def _search_url(q: str) -> str:
-    return f"https://{VEVOR_DOMAIN}/c/search?q={quote(q)}"
+def _search_url(barcode: str) -> str:
+    return f"https://{VEVOR_DOMAIN}/s/{barcode}"
 
 
 # ── Screenshot helper ─────────────────────────────────────────────────────────
@@ -125,35 +125,32 @@ def _check_barcode(context, barcode: str) -> dict:
         _screenshot(page, f'{barcode}_search')
         body = page.inner_text('body').lower()
 
-        no_result_hints = ['0 results', 'no results', 'no products found',
-                           '0 продукта', 'не са намерени', 'няма резултати']
+        # No product found at all
+        no_result_hints = ['no results', 'no products', '0 results',
+                           'не са намерени', 'няма резултати']
         if any(h in body for h in no_result_hints):
             return _result('not_found', 'Не е намерен в Vevor', barcode)
 
+        # Get product name and URL from the search card
+        name = _get_product_name(page)
         product_el = (
             page.query_selector('a[href*="/p/"]') or
-            page.query_selector('a[href*="/goods/"]') or
+            page.query_selector('a[href*="/s/"]') or
             page.query_selector('[class*="goods-item"] a') or
-            page.query_selector('[class*="product-card"] a') or
-            page.query_selector('[class*="item-card"] a')
+            page.query_selector('[class*="product-card"] a')
         )
-        if not product_el:
-            return _result('not_found', 'Не са намерени резултати', barcode)
+        href = ''
+        if product_el:
+            href = product_el.get_attribute('href') or ''
+            if href.startswith('/'):
+                href = f'https://{VEVOR_DOMAIN}{href}'
 
-        href = product_el.get_attribute('href') or ''
-        if href.startswith('/'):
-            href = f'https://{VEVOR_DOMAIN}{href}'
-
-        try:
-            page.goto(href, timeout=30_000, wait_until='domcontentloaded')
-            page.wait_for_timeout(3_000)
-        except PWTimeout:
-            return _result('error', 'Timeout на продуктовата страница', barcode, product_url=href)
-
-        _screenshot(page, f'{barcode}_product')
-        name = _get_product_name(page)
-        body = page.inner_text('body').lower()
+        # Stock status is visible directly on the search results card
+        # "Out of Stock" = red text visible, "View Details" instead of "Add to Cart"
         is_in, is_out = _detect_stock(page, body)
+
+        if not product_el and not is_in and not is_out:
+            return _result('not_found', 'Не са намерени резултати', barcode)
 
         if is_out and not is_in:
             return _result('out_of_stock', 'Няма наличност', barcode, name, href)
