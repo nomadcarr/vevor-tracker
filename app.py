@@ -165,11 +165,18 @@ def clear_alternative(item_id):
 def _run_check():
     global _check_running
     if not _check_lock.acquire(blocking=False):
+        print('[check] Вече се изпълнява, пропускам.')
         return
     _check_running = True
+    print('[check] Стартирам проверка...')
     try:
         from checker import check_all_items
         check_all_items(DB_PATH)
+        print('[check] Готово.')
+    except Exception as e:
+        import traceback
+        print(f'[check] ГРЕШКА: {e}')
+        traceback.print_exc()
     finally:
         _check_running = False
         _check_lock.release()
