@@ -188,8 +188,9 @@ if __name__ == '__main__':
     os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else '.', exist_ok=True)
     init_db()
 
-    scheduler = BackgroundScheduler(timezone='UTC')
-    scheduler.add_job(_run_check, 'interval', hours=3, id='stock_check', replace_existing=True)
+    scheduler = BackgroundScheduler(timezone='Europe/Sofia')
+    scheduler.add_job(_run_check, 'cron', hour='6-22', minute=0,
+                      id='stock_check', replace_existing=True)
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown())
 

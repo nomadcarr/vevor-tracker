@@ -44,6 +44,11 @@ _OUT_PHRASES = [
     'out of stock', 'sold out', 'currently unavailable',
     'няма наличност', 'изчерпан', 'out-of-stock', 'notify me when available',
 ]
+_ALMOST_PHRASES = [
+    'almost sold out', 'low stock', 'limited stock', 'selling fast',
+    'almost gone', 'limited availability', 'nearly sold out', 'hurry',
+    'почти разпродадено', 'ограничено количество',
+]
 _IN_PHRASES = [
     'add to cart', 'add to bag', 'buy now',
     'добави в количката', 'добавяне в количката', 'купи сега',
@@ -51,9 +56,13 @@ _IN_PHRASES = [
 ]
 
 
-def _detect_stock(page, body: str):
-    is_out = any(p in body for p in _OUT_PHRASES)
-    is_in  = any(p in body for p in _IN_PHRASES)
+def _detect_stock(page, body: str) -> str:
+    """Returns: 'in_stock' | 'almost_out' | 'out_of_stock' | 'unknown'"""
+    is_out    = any(p in body for p in _OUT_PHRASES)
+    is_almost = (any(p in body for p in _ALMOST_PHRASES) or
+                 bool(re.search(r'only \d+ left', body)))
+    is_in     = any(p in body for p in _IN_PHRASES)
+
     add_btn = page.query_selector(
         'button:not([disabled])[class*="cart"],'
         'button:not([disabled])[class*="Cart"],'
@@ -62,7 +71,14 @@ def _detect_stock(page, body: str):
     )
     if add_btn:
         is_in = True
-    return is_in, is_out
+
+    if is_out:
+        return 'out_of_stock'
+    if is_almost:
+        return 'almost_out'
+    if is_in:
+        return 'in_stock'
+    return 'unknown'
 
 
 def _get_product_name(page) -> str:
@@ -146,19 +162,18 @@ def _check_barcode(context, barcode: str) -> dict:
                 href = f'https://{VEVOR_DOMAIN}{href}'
 
         # Stock status is visible directly on the search results card
-        # "Out of Stock" = red text visible, "View Details" instead of "Add to Cart"
-        is_in, is_out = _detect_stock(page, body)
+        status = _detect_stock(page, body)
 
-        if not product_el and not is_in and not is_out:
+        if not product_el and status == 'unknown':
             return _result('not_found', 'Не са намерени резултати', barcode)
 
-        # is_out takes priority — "In Stock" appears in filter buttons even for OOS products
-        if is_out:
-            return _result('out_of_stock', 'Няма наличност', barcode, name, href)
-        elif is_in:
-            return _result('in_stock', 'Има наличност', barcode, name, href)
-        else:
-            return _result('unknown', 'Статусът е неясен', barcode, name, href)
+        messages = {
+            'in_stock':    'Има наличност',
+            'almost_out':  'Почти разпродадено',
+            'out_of_stock':'Няма наличност',
+            'unknown':     'Статусът е неясен',
+        }
+        return _result(status, messages.get(status, ''), barcode, name, href)
 
     except Exception as e:
         print(f'    ✗ {e}')
@@ -176,13 +191,7 @@ def _check_by_url(context, url: str) -> dict:
         page.goto(url, timeout=30_000, wait_until='domcontentloaded')
         page.wait_for_timeout(3_000)
         body = page.inner_text('body').lower()
-        is_in, is_out = _detect_stock(page, body)
-        if is_out:
-            return {'status': 'out_of_stock'}
-        elif is_in:
-            return {'status': 'in_stock'}
-        else:
-            return {'status': 'unknown'}
+        return {'status': _detect_stock(page, body)}
     except PWTimeout:
         return {'status': 'error'}
     except Exception as e:
@@ -254,11 +263,11 @@ def _research_alternative(context, original_name: str, original_url: str):
                 prod_page.wait_for_timeout(2_500)
                 _screenshot(prod_page, f'alt_candidate_{candidates.index(url)}')
 
-                name = _get_product_name(prod_page)
-                body = prod_page.inner_text('body').lower()
-                is_in, is_out = _detect_stock(prod_page, body)
+                name   = _get_product_name(prod_page)
+                body   = prod_page.inner_text('body').lower()
+                status = _detect_stock(prod_page, body)
 
-                if not is_in or is_out:
+                if status not in ('in_stock', 'almost_out'):
                     print(f'    [alt] {name[:40]}... → изчерпан, пропускам')
                     continue
 
@@ -300,7 +309,8 @@ def update_item_status(db_path: str, barcode: str, result: dict):
         return
     item_id, old_status = row
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    newly_in = result['status'] == 'in_stock' and old_status != 'in_stock'
+    available = ('in_stock', 'almost_out')
+    newly_in  = result['status'] in available and old_status not in available
 
     conn.execute('''UPDATE items SET
         status=?, last_checked=?,

@@ -61,6 +61,8 @@ tr.ra:hover td{background:rgba(63,185,80,.14)}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .bi{background:rgba(63,185,80,.15);color:#3fb950;border:1px solid rgba(63,185,80,.3)}
 .bi .dot{background:#3fb950;animation:bl 1.2s ease-in-out infinite}
+.ba{background:rgba(255,165,0,.15);color:#ffa500;border:1px solid rgba(255,165,0,.4)}
+.ba .dot{background:#ffa500;animation:bl 0.7s ease-in-out infinite}
 .bo{background:rgba(248,81,73,.15);color:#f85149;border:1px solid rgba(248,81,73,.3)}
 .bo .dot{background:#f85149}
 .bp{background:rgba(139,148,158,.12);color:#8b949e;border:1px solid rgba(139,148,158,.2)}
@@ -99,9 +101,11 @@ tr.ra:hover td{background:rgba(63,185,80,.14)}
 .toast{background:#161b22;border-radius:8px;padding:13px 17px;font-size:13px;max-width:290px;animation:si .3s ease;box-shadow:0 4px 24px rgba(0,0,0,.5)}
 .toast.green{border:1px solid #3fb950}
 .toast.blue{border:1px solid #388bfd}
+.toast.orange{border:1px solid #ffa500}
 .toast strong{display:block;margin-bottom:3px}
 .toast.green strong{color:#3fb950}
 .toast.blue strong{color:#388bfd}
+.toast.orange strong{color:#ffa500}
 .toast.out{animation:so .3s ease forwards}
 @keyframes si{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
 @keyframes so{to{transform:translateX(110%);opacity:0}}
@@ -169,23 +173,42 @@ tr.ra:hover td{background:rgba(63,185,80,.14)}
 let _ac = null;
 function ac(){ if(!_ac) _ac=new(window.AudioContext||window.webkitAudioContext)(); return _ac; }
 
-function playChime(highPitch){
+function _beep(ctx, freq, startT, gain, dur){
+  const o=ctx.createOscillator(), g=ctx.createGain();
+  o.connect(g); g.connect(ctx.destination);
+  o.type='triangle'; o.frequency.value=freq;
+  g.gain.setValueAtTime(0, startT);
+  g.gain.linearRampToValueAtTime(gain, startT+.03);
+  g.gain.exponentialRampToValueAtTime(.001, startT+dur);
+  o.start(startT); o.stop(startT+dur);
+}
+
+function playChime(type){
+  // type: 'in_stock' | 'almost_out' | 'alt'
   try{
     const c=ac();
-    const notes = highPitch
-      ? [[659.25,0],[783.99,.18],[1046.5,.36],[1318.5,.54]]   // high = alt found
-      : [[523.25,0],[659.25,.18],[783.99,.36],[1046.5,.54]];  // normal = in stock
-    notes.forEach(([f,t])=>{
-      const o=c.createOscillator(), g=c.createGain();
-      o.connect(g); g.connect(c.destination);
-      o.type='sine'; o.frequency.value=f;
-      const s=c.currentTime+t;
-      g.gain.setValueAtTime(0,s);
-      g.gain.linearRampToValueAtTime(.22,s+.05);
-      g.gain.exponentialRampToValueAtTime(.001,s+.8);
-      o.start(s); o.stop(s+.8);
-    });
+    if(type==='almost_out'){
+      // Бърз двоен сигнал — предупреждение
+      [0, .35].forEach(t=>{ _beep(c,880,c.currentTime+t,.6,.3); _beep(c,660,c.currentTime+t+.05,.4,.25); });
+    } else {
+      // Ясен тройен акорд — наличност
+      [[523,.0],[659,.2],[784,.4],[1047,.6]].forEach(([f,t])=>_beep(c,f,c.currentTime+t,.55,.7));
+    }
   }catch(e){}
+}
+
+// Повтаря звука 3 пъти с пауза от 1.5с
+function playAlertRepeat(type){
+  playChime(type);
+  setTimeout(()=>playChime(type), 1500);
+  setTimeout(()=>playChime(type), 3000);
+}
+
+// Browser notification (работи дори когато табът е на заден план)
+function browserNotif(title, body){
+  if('Notification' in window && Notification.permission==='granted'){
+    new Notification(title, {body, icon:''});
+  }
 }
 
 /* ── Toast ─────────────────────────────────── */
@@ -201,12 +224,13 @@ function toast(title, body, type){
 /* ── Helpers ───────────────────────────────── */
 function badge(status){
   const m={
-    in_stock:   ['bi','Има наличност'],
+    in_stock:    ['bi','Има наличност'],
+    almost_out:  ['ba','Почти разпродадено'],
     out_of_stock:['bo','Няма наличност'],
-    pending:    ['bp','Изчаква'],
-    unknown:    ['bp','Неизвестен'],
-    error:      ['be','Грешка'],
-    not_found:  ['bn','Не е намерен'],
+    pending:     ['bp','Изчаква'],
+    unknown:     ['bp','Неизвестен'],
+    error:       ['be','Грешка'],
+    not_found:   ['bn','Не е намерен'],
   };
   const [c,l]=m[status]||['bp','—'];
   return `<span class="badge ${c}"><span class="dot"></span>${l}</span>`;
@@ -272,12 +296,18 @@ async function loadItems(){
     if(!firstLoad){
       items.forEach(i=>{
         if(i.new_alert){
-          playChime(false);
-          toast('✓ Има наличност!', i.name||i.product_name||i.barcode, 'green');
+          const type = i.status==='almost_out' ? 'almost_out' : 'in_stock';
+          playAlertRepeat(type);
+          const title = type==='almost_out' ? '⚠️ Почти разпродадено!' : '✓ Има наличност!';
+          const label = i.name||i.product_name||i.barcode;
+          toast(title, label, type==='almost_out'?'orange':'green');
+          browserNotif(title, label);
           fetch(`/api/items/${i.id}/dismiss`,{method:'POST'});
         } else if(i.alt_new_alert){
-          playChime(true);
-          toast('✓ Алтернатива налична!', i.alt_product_name||'', 'blue');
+          playAlertRepeat('in_stock');
+          const label = i.alt_product_name||'';
+          toast('✓ Алтернатива налична!', label, 'blue');
+          browserNotif('✓ Алтернатива налична!', label);
           fetch(`/api/items/${i.id}/dismiss`,{method:'POST'});
         }
       });
@@ -376,6 +406,10 @@ async function triggerCheck(){
 
 /* ── Init ──────────────────────────────────── */
 document.addEventListener('click', ()=>ac(), {once:true});
+// Поискай разрешение за browser notifications
+if('Notification' in window && Notification.permission==='default'){
+  Notification.requestPermission();
+}
 loadItems();
 setInterval(loadItems, 30_000);
 </script>
