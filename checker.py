@@ -72,11 +72,28 @@ def _detect_stock(page, body: str) -> str:
     if add_btn:
         is_in = True
 
-    status = ('out_of_stock' if is_out else
-              'almost_out'  if is_almost else
-              'in_stock'    if is_in else
+    # Log exactly which phrases were found
+    found_out    = [p for p in _OUT_PHRASES    if p in body]
+    found_almost = [p for p in _ALMOST_PHRASES if p in body]
+    found_in     = [p for p in _IN_PHRASES     if p in body]
+    print(f'    [phrases] out={found_out}')
+    print(f'    [phrases] almost={found_almost}')
+    print(f'    [phrases] in={found_in}')
+
+    # Print 80-char snippet around keywords to see exact Vevor text
+    for kw in ['almost', 'sold', 'stock', 'low', 'limited', 'only']:
+        idx = body.find(kw)
+        if idx >= 0:
+            snippet = body[max(0, idx-15):idx+50].replace('\n', ' ')
+            print(f'    [ctx:{kw}] ...{snippet}...')
+
+    # almost_out has highest priority — product is still orderable
+    # is_out can be triggered by hidden filter dropdowns on the page
+    status = ('almost_out'  if is_almost else
+              'out_of_stock' if is_out   else
+              'in_stock'    if is_in    else
               'unknown')
-    print(f'    [stock] out={is_out} almost={is_almost} in={is_in} → {status}')
+    print(f'    [stock] → {status}')
     return status
 
 
