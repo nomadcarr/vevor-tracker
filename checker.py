@@ -72,13 +72,12 @@ def _detect_stock(page, body: str) -> str:
     if add_btn:
         is_in = True
 
-    if is_out:
-        return 'out_of_stock'
-    if is_almost:
-        return 'almost_out'
-    if is_in:
-        return 'in_stock'
-    return 'unknown'
+    status = ('out_of_stock' if is_out else
+              'almost_out'  if is_almost else
+              'in_stock'    if is_in else
+              'unknown')
+    print(f'    [stock] out={is_out} almost={is_almost} in={is_in} → {status}')
+    return status
 
 
 def _get_product_name(page) -> str:
