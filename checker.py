@@ -21,7 +21,16 @@ DEBUG_SCREENSHOTS = _cfg.get('debug_screenshots', False)
 REQUEST_DELAY     = _cfg.get('delay_between_checks', 3)
 
 _UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')
+
+_EXTRA_HEADERS = {
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Upgrade-Insecure-Requests': '1',
+}
 
 
 def _search_url(barcode: str) -> str:
@@ -149,18 +158,23 @@ def _check_barcode(context, barcode: str) -> dict:
         url = _search_url(barcode)
         print(f'    → {url}')
         try:
-            page.goto(url, timeout=30_000, wait_until='domcontentloaded')
-            page.wait_for_timeout(3_000)
+            page.goto(url, timeout=40_000, wait_until='domcontentloaded')
+            page.wait_for_timeout(5_000)
         except PWTimeout:
             return _result('error', 'Timeout при търсене', barcode)
 
         _screenshot(page, f'{barcode}_search')
+        actual_url = page.url
+        print(f'    [url] {actual_url}')
         body = page.inner_text('body').lower()
+        print(f'    [body_preview] {repr(body[:500])}')
 
         # No product found at all
         no_result_hints = ['no results', 'no products', '0 results',
                            'не са намерени', 'няма резултати']
-        if any(h in body for h in no_result_hints):
+        found_no = [h for h in no_result_hints if h in body]
+        if found_no:
+            print(f'    [not_found] triggered by: {found_no}')
             return _result('not_found', 'Не е намерен в Vevor', barcode)
 
         # Get product name and URL from the search card
@@ -390,8 +404,16 @@ def find_alternative_for_item(db_path: str, item_id: int):
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True, args=['--no-sandbox','--disable-dev-shm-usage'])
-            ctx     = browser.new_context(user_agent=_UA, viewport={'width':1280,'height':800})
+            browser = pw.chromium.launch(headless=True, args=[
+                '--no-sandbox', '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled',
+            ])
+            ctx = browser.new_context(
+                user_agent=_UA,
+                viewport={'width': 1280, 'height': 800},
+                extra_http_headers=_EXTRA_HEADERS,
+            )
+            ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
 
             # If product URL not known yet, check the barcode first
             if not product_url:
@@ -448,8 +470,16 @@ def check_all_items(db_path: str):
         return
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True, args=['--no-sandbox','--disable-dev-shm-usage'])
-        ctx     = browser.new_context(user_agent=_UA, viewport={'width':1280,'height':800})
+        browser = pw.chromium.launch(headless=True, args=[
+            '--no-sandbox', '--disable-dev-shm-usage',
+            '--disable-blink-features=AutomationControlled',
+        ])
+        ctx = browser.new_context(
+            user_agent=_UA,
+            viewport={'width': 1280, 'height': 800},
+            extra_http_headers=_EXTRA_HEADERS,
+        )
+        ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
 
         for item_id, barcode, alt_url in rows:
             print(f'  Проверка: {barcode}')
