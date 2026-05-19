@@ -1,18 +1,12 @@
 import os
 import sqlite3
-import threading
-import atexit
 import datetime
 from flask import Flask, render_template, request, jsonify
-from apscheduler.schedulers.background import BackgroundScheduler
 
 DB_PATH = os.environ.get('DB_PATH', 'tracker.db')
 PORT    = int(os.environ.get('PORT', 5000))
 
 app = Flask(__name__)
-
-_check_lock    = threading.Lock()
-_check_running = False
 
 
 # ── Database ────────────────────────────────────────────────────────────────
@@ -45,7 +39,6 @@ def init_db():
         alt_search_status TEXT DEFAULT ''
     )''')
 
-    # Migration: add columns to existing databases
     existing = {row[1] for row in conn.execute('PRAGMA table_info(items)').fetchall()}
     migrations = {
         'order_number':      'TEXT DEFAULT ""',
@@ -123,30 +116,7 @@ def dismiss_alert(item_id):
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    return jsonify({'checking': _check_running})
-
-
-@app.route('/api/check', methods=['POST'])
-def manual_check():
-    global _check_running
-    if _check_running:
-        return jsonify({'ok': False, 'message': 'Проверката вече е в ход'})
-    threading.Thread(target=_run_check, daemon=True).start()
-    return jsonify({'ok': True})
-
-
-@app.route('/api/items/<int:item_id>/find-alternative', methods=['POST'])
-def find_alternative(item_id):
-    from checker import find_alternative_for_item
-    # Mark as searching immediately so UI can show spinner
-    conn = get_db()
-    conn.execute("UPDATE items SET alt_search_status = 'searching' WHERE id = ?", (item_id,))
-    conn.commit()
-    conn.close()
-    threading.Thread(
-        target=find_alternative_for_item, args=(DB_PATH, item_id), daemon=True
-    ).start()
-    return jsonify({'ok': True})
+    return jsonify({'checking': False})
 
 
 @app.route('/api/items/<int:item_id>/update-status', methods=['POST'])
@@ -193,39 +163,10 @@ def clear_alternative(item_id):
     return jsonify({'ok': True})
 
 
-# ── Background helpers ────────────────────────────────────────────────────────
-
-def _run_check():
-    global _check_running
-    if not _check_lock.acquire(blocking=False):
-        print('[check] Вече се изпълнява, пропускам.')
-        return
-    _check_running = True
-    print('[check] Стартирам проверка...')
-    try:
-        from checker import check_all_items
-        check_all_items(DB_PATH)
-        print('[check] Готово.')
-    except Exception as e:
-        import traceback
-        print(f'[check] ГРЕШКА: {e}')
-        traceback.print_exc()
-    finally:
-        _check_running = False
-        _check_lock.release()
-
-
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else '.', exist_ok=True)
     init_db()
-
-    scheduler = BackgroundScheduler(timezone='Europe/Sofia')
-    scheduler.add_job(_run_check, 'cron', hour='6-22', minute=0,
-                      id='stock_check', replace_existing=True)
-    scheduler.start()
-    atexit.register(lambda: scheduler.shutdown())
-
     print(f"\n{'='*50}\n  Vevor Stock Tracker → http://localhost:{PORT}\n{'='*50}\n")
     app.run(debug=False, host='0.0.0.0', port=PORT, use_reloader=False)
