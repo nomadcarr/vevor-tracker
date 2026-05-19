@@ -2,6 +2,7 @@ import os
 import sqlite3
 import threading
 import atexit
+import datetime
 from flask import Flask, render_template, request, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -146,6 +147,38 @@ def find_alternative(item_id):
         target=find_alternative_for_item, args=(DB_PATH, item_id), daemon=True
     ).start()
     return jsonify({'ok': True})
+
+
+@app.route('/api/items/<int:item_id>/update-status', methods=['POST'])
+def update_item_status(item_id):
+    data         = request.get_json()
+    status       = data.get('status', 'unknown')
+    product_name = (data.get('product_name') or '').strip()
+    product_url  = (data.get('product_url')  or '').strip()
+
+    conn = get_db()
+    row  = conn.execute('SELECT status FROM items WHERE id=?', (item_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'not found'}), 404
+
+    old_status = row['status']
+    now        = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    available  = ('in_stock', 'almost_out')
+    newly_in   = status in available and old_status not in available
+
+    conn.execute('''UPDATE items SET
+        status=?, last_checked=?,
+        new_alert    = CASE WHEN ? THEN 1 ELSE new_alert END,
+        product_name = CASE WHEN ?!='' THEN ? ELSE product_name END,
+        product_url  = CASE WHEN ?!='' THEN ? ELSE product_url END
+        WHERE id=?''',
+        (status, now, newly_in,
+         product_name, product_name,
+         product_url,  product_url, item_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'newly_in': newly_in})
 
 
 @app.route('/api/items/<int:item_id>/clear-alternative', methods=['POST'])
