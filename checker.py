@@ -3,8 +3,6 @@ import sqlite3
 import datetime
 import time
 import json
-import os
-from urllib.parse import quote
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -15,36 +13,31 @@ def _load_config():
     except FileNotFoundError:
         return {}
 
-_cfg              = _load_config()
-VEVOR_DOMAIN      = _cfg.get('vevor_domain', 'www.vevor.bg')
-DEBUG_SCREENSHOTS = _cfg.get('debug_screenshots', False)
-REQUEST_DELAY     = _cfg.get('delay_between_checks', 3)
-
-_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')
-
-_EXTRA_HEADERS = {
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Upgrade-Insecure-Requests': '1',
-}
+_cfg          = _load_config()
+VEVOR_DOMAIN  = _cfg.get('vevor_domain', 'eur.vevor.com')
+REQUEST_DELAY = _cfg.get('delay_between_checks', 3)
 
 
-def _search_url(barcode: str) -> str:
-    return f"https://{VEVOR_DOMAIN}/s/{barcode}"
+def _search_url(query: str) -> str:
+    return f"https://{VEVOR_DOMAIN}/s/{query}"
 
 
-# ── Screenshot helper ─────────────────────────────────────────────────────────
+# ── HTTP (curl-cffi bypasses Cloudflare TLS fingerprint) ─────────────────────
 
-def _screenshot(page, name: str):
-    if DEBUG_SCREENSHOTS:
-        os.makedirs('debug', exist_ok=True)
-        path = f'debug/{re.sub(r"[^a-zA-Z0-9_-]", "_", name)}.png'
-        page.screenshot(path=path, full_page=False)
-        print(f'    [debug] {path}')
+def _fetch(url: str) -> str:
+    from curl_cffi import requests as cf
+    r = cf.get(url, impersonate='chrome124', timeout=30,
+               headers={'Accept-Language': 'en-US,en;q=0.9'})
+    return r.text
+
+
+def _soup(html: str):
+    from bs4 import BeautifulSoup
+    return BeautifulSoup(html, 'html.parser')
+
+
+def _body_text(html: str) -> str:
+    return _soup(html).get_text(separator=' ').lower()
 
 
 # ── Stock detection ───────────────────────────────────────────────────────────
@@ -55,80 +48,41 @@ _OUT_PHRASES = [
 ]
 _ALMOST_PHRASES = [
     'almost sold out', 'low stock', 'limited stock', 'selling fast',
-    'almost gone', 'limited availability', 'nearly sold out', 'hurry',
+    'almost gone', 'limited availability', 'nearly sold out',
     'почти разпродадено', 'ограничено количество',
 ]
 _IN_PHRASES = [
     'add to cart', 'add to bag', 'buy now',
-    'добави в количката', 'добавяне в количката', 'купи сега',
-    'в наличност', 'in stock',
+    'добави в количката', 'купи сега', 'в наличност', 'in stock',
 ]
 
 
-def _detect_stock(page, body: str) -> str:
-    """Returns: 'in_stock' | 'almost_out' | 'out_of_stock' | 'unknown'"""
+def _detect_stock(body: str) -> str:
     is_out    = any(p in body for p in _OUT_PHRASES)
-    is_almost = (any(p in body for p in _ALMOST_PHRASES) or
-                 bool(re.search(r'only \d+ left', body)))
+    is_almost = any(p in body for p in _ALMOST_PHRASES) or bool(re.search(r'only \d+ left', body))
     is_in     = any(p in body for p in _IN_PHRASES)
 
-    add_btn = page.query_selector(
-        'button:not([disabled])[class*="cart"],'
-        'button:not([disabled])[class*="Cart"],'
-        'button:not([disabled])[id*="cart"],'
-        'button:not([disabled])[class*="buy"]'
-    )
-    if add_btn:
-        is_in = True
+    print(f'    [phrases] out={[p for p in _OUT_PHRASES if p in body]}')
+    print(f'    [phrases] almost={[p for p in _ALMOST_PHRASES if p in body]}')
+    print(f'    [phrases] in={[p for p in _IN_PHRASES if p in body]}')
 
-    # Log exactly which phrases were found
-    found_out    = [p for p in _OUT_PHRASES    if p in body]
-    found_almost = [p for p in _ALMOST_PHRASES if p in body]
-    found_in     = [p for p in _IN_PHRASES     if p in body]
-    print(f'    [phrases] out={found_out}')
-    print(f'    [phrases] almost={found_almost}')
-    print(f'    [phrases] in={found_in}')
-
-    # Print 80-char snippet around keywords to see exact Vevor text
-    for kw in ['almost', 'sold', 'stock', 'low', 'limited', 'only']:
-        idx = body.find(kw)
-        if idx >= 0:
-            snippet = body[max(0, idx-15):idx+50].replace('\n', ' ')
-            print(f'    [ctx:{kw}] ...{snippet}...')
-
-    # almost_out has highest priority — product is still orderable
-    # is_out can be triggered by hidden filter dropdowns on the page
-    status = ('almost_out'  if is_almost else
-              'out_of_stock' if is_out   else
-              'in_stock'    if is_in    else
+    status = ('almost_out'   if is_almost else
+              'out_of_stock' if is_out    else
+              'in_stock'     if is_in     else
               'unknown')
     print(f'    [stock] → {status}')
     return status
 
 
-def _get_product_name(page) -> str:
-    for sel in ['h1', '[class*="product-title"]', '[class*="goods-name"]',
-                '[class*="product-name"]', '[class*="item-title"]']:
-        el = page.query_selector(sel)
-        if el:
-            text = el.inner_text().strip()
-            if text:
-                return text[:220]
-    return ''
-
-
 # ── Similarity scoring ────────────────────────────────────────────────────────
 
 def _similarity(a: str, b: str) -> float:
-    """Word/number overlap similarity, 0–1. Numbers weighted 2×."""
     stop = {'the', 'and', 'for', 'with', 'set', 'kit', 'pcs', 'pce',
             'pack', 'piece', 'professional', 'industrial', 'grade', 'heavy', 'duty'}
-
     nums_a = set(re.findall(r'\d+(?:\.\d+)?(?:mm|cm|m|l|w|v|hz|kg|lb|in|rpm)?', a.lower()))
     nums_b = set(re.findall(r'\d+(?:\.\d+)?(?:mm|cm|m|l|w|v|hz|kg|lb|in|rpm)?', b.lower()))
     words_a = {w.lower() for w in re.findall(r'[a-zA-Z]{3,}', a) if w.lower() not in stop}
     words_b = {w.lower() for w in re.findall(r'[a-zA-Z]{3,}', b) if w.lower() not in stop}
-
     score = len(nums_a & nums_b) * 2 + len(words_a & words_b)
     denom = max(len(nums_a) * 2 + len(words_a), len(nums_b) * 2 + len(words_b), 1)
     return score / denom
@@ -142,191 +96,145 @@ def _search_keywords(product_name: str) -> str:
     return ' '.join(words[:6])
 
 
-# ── Result helpers ────────────────────────────────────────────────────────────
+# ── Result helper ─────────────────────────────────────────────────────────────
 
 def _result(status, message, barcode='', product_name='', product_url=''):
     return {'status': status, 'message': message,
             'barcode': barcode, 'product_name': product_name, 'product_url': product_url}
 
 
-# ── Core barcode checker (reuses browser context) ─────────────────────────────
+# ── Core barcode checker ──────────────────────────────────────────────────────
 
-def _check_barcode(context, barcode: str) -> dict:
-    from playwright.sync_api import TimeoutError as PWTimeout
-    page = context.new_page()
+_NO_RESULT_HINTS = ['no results', 'no products', '0 results',
+                    'не са намерени', 'няма резултати']
+_CF_HINTS        = ['challenge', 'just a moment', 'checking your browser',
+                    'enable javascript', 'ddos-guard']
+
+_STATUS_MESSAGES = {
+    'in_stock':    'Има наличност',
+    'almost_out':  'Почти разпродадено',
+    'out_of_stock':'Няма наличност',
+    'unknown':     'Статусът е неясен',
+}
+
+
+def _check_barcode(barcode: str) -> dict:
+    url = _search_url(barcode)
+    print(f'    → {url}')
     try:
-        url = _search_url(barcode)
-        print(f'    → {url}')
-        try:
-            page.goto(url, timeout=40_000, wait_until='domcontentloaded')
-            page.wait_for_timeout(5_000)
-        except PWTimeout:
-            return _result('error', 'Timeout при търсене', barcode)
-
-        _screenshot(page, f'{barcode}_search')
-        actual_url = page.url
-        print(f'    [url] {actual_url}')
-        body = page.inner_text('body').lower()
-        print(f'    [body_preview] {repr(body[:500])}')
-
-        # No product found at all
-        no_result_hints = ['no results', 'no products', '0 results',
-                           'не са намерени', 'няма резултати']
-        found_no = [h for h in no_result_hints if h in body]
-        if found_no:
-            print(f'    [not_found] triggered by: {found_no}')
-            return _result('not_found', 'Не е намерен в Vevor', barcode)
-
-        # Get product name and URL from the search card
-        name = _get_product_name(page)
-        product_el = (
-            page.query_selector('a[href*="/p/"]') or
-            page.query_selector('a[href*="/s/"]') or
-            page.query_selector('[class*="goods-item"] a') or
-            page.query_selector('[class*="product-card"] a')
-        )
-        href = ''
-        if product_el:
-            href = product_el.get_attribute('href') or ''
-            if href.startswith('/'):
-                href = f'https://{VEVOR_DOMAIN}{href}'
-
-        # Stock status is visible directly on the search results card
-        status = _detect_stock(page, body)
-
-        if not product_el and status == 'unknown':
-            return _result('not_found', 'Не са намерени резултати', barcode)
-
-        messages = {
-            'in_stock':    'Има наличност',
-            'almost_out':  'Почти разпродадено',
-            'out_of_stock':'Няма наличност',
-            'unknown':     'Статусът е неясен',
-        }
-        return _result(status, messages.get(status, ''), barcode, name, href)
-
+        html = _fetch(url)
     except Exception as e:
-        print(f'    ✗ {e}')
         return _result('error', str(e)[:100], barcode)
-    finally:
-        page.close()
+
+    body = _body_text(html)
+    print(f'    [body_preview] {repr(body[:400])}')
+
+    if any(h in body for h in _CF_HINTS):
+        print('    [blocked] Cloudflare challenge')
+        return _result('error', 'Cloudflare блок', barcode)
+
+    if any(h in body for h in _NO_RESULT_HINTS):
+        return _result('not_found', 'Не е намерен в Vevor', barcode)
+
+    # First product link
+    s = _soup(html)
+    link_el = s.find('a', href=re.compile(r'/p/'))
+    href = ''
+    if link_el:
+        href = link_el['href']
+        if href.startswith('/'):
+            href = f'https://{VEVOR_DOMAIN}{href}'
+
+    # Product name from first h2/h3 in search cards or h1
+    name = ''
+    for tag in ['h1', 'h2', 'h3']:
+        el = s.find(tag)
+        if el:
+            t = el.get_text(strip=True)
+            if t and len(t) > 5:
+                name = t[:220]
+                break
+
+    status = _detect_stock(body)
+
+    if not href and status == 'unknown':
+        return _result('not_found', 'Не са намерени резултати', barcode)
+
+    return _result(status, _STATUS_MESSAGES.get(status, ''), barcode, name, href)
 
 
-# ── Alternative stock check (by URL) ─────────────────────────────────────────
-
-def _check_by_url(context, url: str) -> dict:
-    from playwright.sync_api import TimeoutError as PWTimeout
-    page = context.new_page()
+def _check_by_url(url: str) -> dict:
     try:
-        page.goto(url, timeout=30_000, wait_until='domcontentloaded')
-        page.wait_for_timeout(3_000)
-        body = page.inner_text('body').lower()
-        return {'status': _detect_stock(page, body)}
-    except PWTimeout:
-        return {'status': 'error'}
+        html  = _fetch(url)
+        body  = _body_text(html)
+        return {'status': _detect_stock(body)}
     except Exception as e:
         print(f'    ✗ alt check: {e}')
         return {'status': 'error'}
-    finally:
-        page.close()
 
 
 # ── Alternative product research ──────────────────────────────────────────────
 
-def _research_alternative(context, original_name: str, original_url: str):
-    """
-    Search Vevor for an in-stock alternative to the given product.
-    Returns dict with product_name, url, similarity — or None.
-    """
-    from playwright.sync_api import TimeoutError as PWTimeout
-    page = context.new_page()
+def _research_alternative(original_name: str, original_url: str):
+    query = _search_keywords(original_name)
+    if not query:
+        return None
+
+    print(f'    [alt] Търсене: "{query}"')
     try:
-        # Build search query from original product name
-        query = _search_keywords(original_name)
-        if not query:
-            return None
+        html = _fetch(_search_url(query))
+    except Exception:
+        return None
 
-        print(f'    [alt] Търсене: "{query}"')
-        search_url = _search_url(query)
+    s = _soup(html)
+    seen, candidates = set(), []
+    for a in s.find_all('a', href=re.compile(r'/p/')):
+        href = a['href']
+        if href.startswith('/'):
+            href = f'https://{VEVOR_DOMAIN}{href}'
+        if href in seen:
+            continue
+        if original_url and (href == original_url or original_url.split('?')[0] in href):
+            continue
+        seen.add(href)
+        candidates.append(href)
+        if len(candidates) >= 8:
+            break
 
+    if not candidates:
+        print('    [alt] Няма кандидати')
+        return None
+
+    best, best_score = None, 0.0
+    for url in candidates[:6]:
         try:
-            page.goto(search_url, timeout=30_000, wait_until='domcontentloaded')
-            page.wait_for_timeout(3_500)
-        except PWTimeout:
-            return None
-
-        _screenshot(page, 'alt_search')
-
-        # Collect candidate product links (skip the original)
-        all_links = (
-            page.query_selector_all('a[href*="/p/"]') or
-            page.query_selector_all('a[href*="/goods/"]')
-        )
-
-        seen = set()
-        candidates = []
-        for el in all_links:
-            href = el.get_attribute('href') or ''
-            if href.startswith('/'):
-                href = f'https://{VEVOR_DOMAIN}{href}'
-            if not href or href in seen:
+            html2  = _fetch(url)
+            body2  = _body_text(html2)
+            status = _detect_stock(body2)
+            if status not in ('in_stock', 'almost_out'):
                 continue
-            # Skip the original product
-            if original_url and (href == original_url or original_url.split('?')[0] in href):
-                continue
-            seen.add(href)
-            candidates.append(href)
-            if len(candidates) >= 8:
-                break
+            s2   = _soup(html2)
+            name = ''
+            for tag in ['h1', 'h2']:
+                el = s2.find(tag)
+                if el:
+                    t = el.get_text(strip=True)
+                    if t and len(t) > 5:
+                        name = t[:220]
+                        break
+            score = _similarity(original_name, name)
+            print(f'    [alt] {name[:50]}… score={score:.2f}')
+            if score > best_score:
+                best_score = score
+                best = {'product_name': name, 'url': url}
+        except Exception:
+            pass
+        time.sleep(1)
 
-        if not candidates:
-            print('    [alt] Няма кандидати')
-            return None
-
-        best = None
-        best_score = 0.0
-
-        for url in candidates[:6]:
-            prod_page = context.new_page()
-            try:
-                prod_page.goto(url, timeout=25_000, wait_until='domcontentloaded')
-                prod_page.wait_for_timeout(2_500)
-                _screenshot(prod_page, f'alt_candidate_{candidates.index(url)}')
-
-                name   = _get_product_name(prod_page)
-                body   = prod_page.inner_text('body').lower()
-                status = _detect_stock(prod_page, body)
-
-                if status not in ('in_stock', 'almost_out'):
-                    print(f'    [alt] {name[:40]}... → изчерпан, пропускам')
-                    continue
-
-                score = _similarity(original_name, name)
-                print(f'    [alt] {name[:50]}... → score={score:.2f}')
-
-                if score > best_score:
-                    best_score = score
-                    best = {'product_name': name, 'url': url}
-
-            except Exception:
-                pass
-            finally:
-                prod_page.close()
-
-            time.sleep(1)
-
-        if best:
-            best['similarity'] = 'Идентичен' if best_score >= 0.65 else 'Сходен'
-            print(f'    [alt] Намерена алтернатива: {best["product_name"][:60]} ({best["similarity"]})')
-            return best
-
-        return None
-
-    except Exception as e:
-        print(f'    [alt] Грешка: {e}')
-        return None
-    finally:
-        page.close()
+    if best:
+        best['similarity'] = 'Идентичен' if best_score >= 0.65 else 'Сходен'
+        return best
+    return None
 
 
 # ── DB update helpers ─────────────────────────────────────────────────────────
@@ -338,24 +246,20 @@ def update_item_status(db_path: str, barcode: str, result: dict):
         conn.close()
         return
     item_id, old_status = row
-    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now      = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     available = ('in_stock', 'almost_out')
     newly_in  = result['status'] in available and old_status not in available
-
     conn.execute('''UPDATE items SET
         status=?, last_checked=?,
-        new_alert      = CASE WHEN ? THEN 1 ELSE new_alert END,
-        product_name   = CASE WHEN ?!='' THEN ? ELSE product_name END,
-        product_url    = CASE WHEN ?!='' THEN ? ELSE product_url END
+        new_alert    = CASE WHEN ? THEN 1 ELSE new_alert END,
+        product_name = CASE WHEN ?!='' THEN ? ELSE product_name END,
+        product_url  = CASE WHEN ?!='' THEN ? ELSE product_url END
         WHERE id=?''',
-        (result['status'], now,
-         newly_in,
+        (result['status'], now, newly_in,
          result['product_name'], result['product_name'],
-         result['product_url'],  result['product_url'],
-         item_id))
+         result['product_url'],  result['product_url'], item_id))
     conn.commit()
     conn.close()
-
     icon = {'in_stock':'✓','out_of_stock':'✗','error':'!','not_found':'?','unknown':'~'}.get(result['status'],'?')
     print(f'    {icon} {result["status"]}: {result["message"]}')
     if newly_in:
@@ -368,8 +272,8 @@ def _update_alt_status(db_path: str, item_id: int, status: str):
     if not row:
         conn.close()
         return
-    old  = row[0]
-    now  = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    old      = row[0]
+    now      = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     newly_in = status == 'in_stock' and old != 'in_stock'
     conn.execute('''UPDATE items SET
         alt_status=?, alt_last_checked=?,
@@ -395,41 +299,24 @@ def find_alternative_for_item(db_path: str, item_id: int):
     barcode, product_name, product_url = row
     print(f'\n[alt] Търся алтернатива за {barcode}…')
 
-    def _set_search_status(s):
+    def _set(s):
         c = sqlite3.connect(db_path)
         c.execute("UPDATE items SET alt_search_status=? WHERE id=?", (s, item_id))
         c.commit()
         c.close()
 
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True, args=[
-                '--no-sandbox', '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled',
-            ])
-            ctx = browser.new_context(
-                user_agent=_UA,
-                viewport={'width': 1280, 'height': 800},
-                extra_http_headers=_EXTRA_HEADERS,
-            )
-            ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
+        if not product_url:
+            r = _check_barcode(barcode)
+            update_item_status(db_path, barcode, r)
+            product_url  = r.get('product_url', '')
+            product_name = r.get('product_name', '') or product_name
 
-            # If product URL not known yet, check the barcode first
-            if not product_url:
-                result = _check_barcode(ctx, barcode)
-                update_item_status(db_path, barcode, result)
-                product_url  = result.get('product_url', '')
-                product_name = result.get('product_name', '') or product_name
+        if not product_url:
+            _set('not_found')
+            return
 
-            if not product_url:
-                browser.close()
-                _set_search_status('not_found')
-                return
-
-            alt = _research_alternative(ctx, product_name, product_url)
-            browser.close()
-
+        alt = _research_alternative(product_name, product_url)
         if alt:
             c = sqlite3.connect(db_path)
             c.execute('''UPDATE items SET
@@ -440,20 +327,17 @@ def find_alternative_for_item(db_path: str, item_id: int):
             c.commit()
             c.close()
         else:
-            _set_search_status('not_found')
-
+            _set('not_found')
     except Exception as e:
         print(f'[alt] Грешка: {e}')
-        _set_search_status('not_found')
+        _set('not_found')
 
 
 # ── Public: check all items ───────────────────────────────────────────────────
 
 def check_all_items(db_path: str):
-    conn  = sqlite3.connect(db_path)
-    rows  = conn.execute(
-        'SELECT id, barcode, alt_product_url FROM items'
-    ).fetchall()
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute('SELECT id, barcode, alt_product_url FROM items').fetchall()
     conn.close()
 
     if not rows:
@@ -463,39 +347,19 @@ def check_all_items(db_path: str):
     ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f'\n[{ts}] Проверка на {len(rows)} артикула…')
 
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print('ГРЕШКА: playwright не е инсталиран.')
-        return
+    for item_id, barcode, alt_url in rows:
+        print(f'  Проверка: {barcode}')
+        result = _check_barcode(barcode)
+        update_item_status(db_path, barcode, result)
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True, args=[
-            '--no-sandbox', '--disable-dev-shm-usage',
-            '--disable-blink-features=AutomationControlled',
-        ])
-        ctx = browser.new_context(
-            user_agent=_UA,
-            viewport={'width': 1280, 'height': 800},
-            extra_http_headers=_EXTRA_HEADERS,
-        )
-        ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
+        if alt_url:
+            print(f'  Проверка алтернатива за #{item_id}…')
+            alt_result = _check_by_url(alt_url)
+            _update_alt_status(db_path, item_id, alt_result['status'])
+            icon = '✓' if alt_result['status'] == 'in_stock' else '✗'
+            print(f'    {icon} алт: {alt_result["status"]}')
 
-        for item_id, barcode, alt_url in rows:
-            print(f'  Проверка: {barcode}')
-            result = _check_barcode(ctx, barcode)
-            update_item_status(db_path, barcode, result)
-
-            if alt_url:
-                print(f'  Проверка алтернатива за #{item_id}…')
-                alt_result = _check_by_url(ctx, alt_url)
-                _update_alt_status(db_path, item_id, alt_result['status'])
-                icon = '✓' if alt_result['status']=='in_stock' else '✗'
-                print(f'    {icon} алт: {alt_result["status"]}')
-
-            time.sleep(REQUEST_DELAY)
-
-        browser.close()
+        time.sleep(REQUEST_DELAY)
 
     ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f'[{ts}] Проверката завърши.\n')
