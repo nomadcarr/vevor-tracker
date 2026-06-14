@@ -119,6 +119,11 @@ def get_status():
     return jsonify({'checking': False})
 
 
+@app.route('/api/check', methods=['POST'])
+def manual_check():
+    return jsonify({'ok': False, 'message': 'Проверката се извършва от локалния компютър. Пусни python local_checker.py'})
+
+
 @app.route('/api/items/<int:item_id>/update-status', methods=['POST'])
 def update_item_status(item_id):
     data         = request.get_json()
@@ -140,15 +145,20 @@ def update_item_status(item_id):
     conn.execute('''UPDATE items SET
         status=?, last_checked=?,
         new_alert    = CASE WHEN ? THEN 1 ELSE new_alert END,
-        product_name = CASE WHEN ?!='' THEN ? ELSE product_name END,
-        product_url  = CASE WHEN ?!='' THEN ? ELSE product_url END
+        product_name = CASE WHEN length(?)>0 THEN ? ELSE product_name END,
+        product_url  = CASE WHEN length(?)>0 THEN ? ELSE product_url END
         WHERE id=?''',
-        (status, now, newly_in,
+        (status, now, 1 if newly_in else 0,
          product_name, product_name,
          product_url,  product_url, item_id))
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'newly_in': newly_in})
+
+
+@app.route('/api/items/<int:item_id>/find-alternative', methods=['POST'])
+def find_alternative(item_id):
+    return jsonify({'ok': False, 'message': 'Не е налично'}), 200
 
 
 @app.route('/api/items/<int:item_id>/clear-alternative', methods=['POST'])
