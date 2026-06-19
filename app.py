@@ -212,6 +212,9 @@ def clear_alternative(item_id):
 
 if __name__ == '__main__':
     os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else '.', exist_ok=True)
-    init_db()
+    try:
+        init_db()
+    except Exception as e:
+        print(f"init_db warning (ще се опита пак при заявка): {e}", flush=True)
     print(f"\n{'='*50}\n  Vevor Stock Tracker → http://localhost:{PORT}\n{'='*50}\n")
     app.run(debug=False, host='0.0.0.0', port=PORT, use_reloader=False)
