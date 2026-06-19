@@ -124,6 +124,32 @@ def get_status():
     return jsonify({'checking': False})
 
 
+@app.route('/api/debug', methods=['GET'])
+def debug_info():
+    import stat
+    db_dir = os.path.dirname(DB_PATH) or '.'
+    db_exists = os.path.exists(DB_PATH)
+    info = {
+        'DB_PATH': DB_PATH,
+        'db_exists': db_exists,
+        'dir_writable': os.access(db_dir, os.W_OK),
+        'file_writable': os.access(DB_PATH, os.W_OK) if db_exists else None,
+        'dir_stat': oct(stat.S_IMODE(os.stat(db_dir).st_mode)),
+        'file_stat': oct(stat.S_IMODE(os.stat(DB_PATH).st_mode)) if db_exists else None,
+    }
+    try:
+        conn = get_db()
+        conn.execute('CREATE TABLE IF NOT EXISTS _test (x INTEGER)')
+        conn.execute('INSERT INTO _test VALUES (1)')
+        conn.execute('DELETE FROM _test')
+        conn.commit()
+        conn.close()
+        info['write_test'] = 'OK'
+    except Exception as e:
+        info['write_test'] = str(e)
+    return jsonify(info)
+
+
 @app.route('/api/check', methods=['POST'])
 def manual_check():
     return jsonify({'ok': False, 'message': 'Проверката се извършва от локалния компютър. Пусни python local_checker.py'})
