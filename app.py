@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import datetime
+import traceback
 from flask import Flask, render_template, request, jsonify
 
 DB_PATH = os.environ.get('DB_PATH', 'tracker.db')
@@ -98,11 +99,15 @@ def add_item():
 
 @app.route('/api/items/<int:item_id>', methods=['DELETE'])
 def delete_item(item_id):
-    conn = get_db()
-    conn.execute('DELETE FROM items WHERE id = ?', (item_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True})
+    try:
+        conn = get_db()
+        conn.execute('DELETE FROM items WHERE id = ?', (item_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'ok': True})
+    except Exception as e:
+        print(f"DELETE ERROR: {e}\n{traceback.format_exc()}", flush=True)
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/items/<int:item_id>/dismiss', methods=['POST'])
@@ -142,18 +147,22 @@ def update_item_status(item_id):
     available  = ('in_stock', 'almost_out')
     newly_in   = status in available and old_status not in available
 
-    conn.execute('''UPDATE items SET
-        status=?, last_checked=?,
-        new_alert    = CASE WHEN ? THEN 1 ELSE new_alert END,
-        product_name = CASE WHEN length(?)>0 THEN ? ELSE product_name END,
-        product_url  = CASE WHEN length(?)>0 THEN ? ELSE product_url END
-        WHERE id=?''',
-        (status, now, 1 if newly_in else 0,
-         product_name, product_name,
-         product_url,  product_url, item_id))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True, 'newly_in': newly_in})
+    try:
+        conn.execute('''UPDATE items SET
+            status=?, last_checked=?,
+            new_alert    = CASE WHEN ? THEN 1 ELSE new_alert END,
+            product_name = CASE WHEN length(?)>0 THEN ? ELSE product_name END,
+            product_url  = CASE WHEN length(?)>0 THEN ? ELSE product_url END
+            WHERE id=?''',
+            (status, now, 1 if newly_in else 0,
+             product_name, product_name,
+             product_url,  product_url, item_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'ok': True, 'newly_in': newly_in})
+    except Exception as e:
+        print(f"UPDATE ERROR: {e}\n{traceback.format_exc()}", flush=True)
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/items/<int:item_id>/find-alternative', methods=['POST'])
