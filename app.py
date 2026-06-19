@@ -121,7 +121,7 @@ def dismiss_alert(item_id):
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    return jsonify({'checking': False})
+    return jsonify({'checking': False, 'version': '3'})
 
 
 @app.route('/api/debug', methods=['GET'])
