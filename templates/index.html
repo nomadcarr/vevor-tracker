@@ -375,7 +375,11 @@ async function addItem(){
 /* ── Delete ────────────────────────────────── */
 async function delItem(id, barcode){
   if(!confirm(`Спиране на следенето:\n${barcode}`)) return;
-  await fetch(`/api/items/${id}`,{method:'DELETE'});
+  const r = await fetch(`/api/items/${id}`,{method:'DELETE'});
+  if(!r.ok){
+    const txt = await r.text();
+    alert(`Грешка при изтриване (${r.status}):\n${txt}`);
+  }
   await loadItems();
 }
 
