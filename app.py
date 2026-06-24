@@ -70,11 +70,13 @@ def index():
 @app.route('/api/items', methods=['GET'])
 def get_items():
     conn = get_db()
-    rows = conn.execute(
-        'SELECT * FROM items ORDER BY new_alert DESC, alt_new_alert DESC, added_at DESC'
-    ).fetchall()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
+    try:
+        rows = conn.execute(
+            'SELECT * FROM items ORDER BY new_alert DESC, alt_new_alert DESC, added_at DESC'
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+    finally:
+        conn.close()
 
 
 @app.route('/api/items', methods=['POST'])
@@ -85,39 +87,43 @@ def add_item():
     order_number = (data.get('order_number') or '').strip()
     if not barcode:
         return jsonify({'error': 'Баркодът е задължителен'}), 400
+    conn = get_db()
     try:
-        conn = get_db()
         conn.execute(
             'INSERT INTO items (barcode, name, order_number) VALUES (?, ?, ?)',
             (barcode, name, order_number)
         )
         conn.commit()
-        conn.close()
         return jsonify({'ok': True})
     except sqlite3.IntegrityError:
         return jsonify({'error': 'Баркодът вече се следи'}), 409
+    finally:
+        conn.close()
 
 
 @app.route('/api/items/<int:item_id>', methods=['DELETE'])
 def delete_item(item_id):
+    conn = get_db()
     try:
-        conn = get_db()
         conn.execute('DELETE FROM items WHERE id = ?', (item_id,))
         conn.commit()
-        conn.close()
         return jsonify({'ok': True})
     except Exception as e:
         print(f"DELETE ERROR: {e}\n{traceback.format_exc()}", flush=True)
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 
 @app.route('/api/items/<int:item_id>/dismiss', methods=['POST'])
 def dismiss_alert(item_id):
     conn = get_db()
-    conn.execute('UPDATE items SET new_alert = 0, alt_new_alert = 0 WHERE id = ?', (item_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True})
+    try:
+        conn.execute('UPDATE items SET new_alert = 0, alt_new_alert = 0 WHERE id = ?', (item_id,))
+        conn.commit()
+        return jsonify({'ok': True})
+    finally:
+        conn.close()
 
 
 @app.route('/api/status', methods=['GET'])
@@ -164,17 +170,16 @@ def update_item_status(item_id):
     product_url  = (data.get('product_url')  or '').strip()
 
     conn = get_db()
-    row  = conn.execute('SELECT status FROM items WHERE id=?', (item_id,)).fetchone()
-    if not row:
-        conn.close()
-        return jsonify({'error': 'not found'}), 404
-
-    old_status = row['status']
-    now        = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    available  = ('in_stock', 'almost_out')
-    newly_in   = status in available and old_status not in available
-
     try:
+        row = conn.execute('SELECT status FROM items WHERE id=?', (item_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'not found'}), 404
+
+        old_status = row['status']
+        now        = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        available  = ('in_stock', 'almost_out')
+        newly_in   = status in available and old_status not in available
+
         conn.execute('''UPDATE items SET
             status=?, last_checked=?,
             new_alert    = CASE WHEN ? THEN 1 ELSE new_alert END,
@@ -185,11 +190,12 @@ def update_item_status(item_id):
              product_name, product_name,
              product_url,  product_url, item_id))
         conn.commit()
-        conn.close()
         return jsonify({'ok': True, 'newly_in': newly_in})
     except Exception as e:
         print(f"UPDATE ERROR: {e}\n{traceback.format_exc()}", flush=True)
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 
 @app.route('/api/items/<int:item_id>/find-alternative', methods=['POST'])
@@ -200,13 +206,15 @@ def find_alternative(item_id):
 @app.route('/api/items/<int:item_id>/clear-alternative', methods=['POST'])
 def clear_alternative(item_id):
     conn = get_db()
-    conn.execute('''UPDATE items SET
-        alt_product_name='', alt_product_url='', alt_similarity='',
-        alt_status='', alt_last_checked='', alt_new_alert=0, alt_search_status=''
-        WHERE id=?''', (item_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True})
+    try:
+        conn.execute('''UPDATE items SET
+            alt_product_name='', alt_product_url='', alt_similarity='',
+            alt_status='', alt_last_checked='', alt_new_alert=0, alt_search_status=''
+            WHERE id=?''', (item_id,))
+        conn.commit()
+        return jsonify({'ok': True})
+    finally:
+        conn.close()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
